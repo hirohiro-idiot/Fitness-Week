@@ -12,15 +12,15 @@ style.textContent=`#coachDialog{width:min(620px,calc(100% - 20px));max-height:ca
 document.head.append(style);
 const launch=document.createElement('button');launch.id='coachLaunch';launch.textContent='▶ トレーニングコーチを開く';$('content').before(launch);
 const dlg=document.createElement('dialog');dlg.id='coachDialog';document.body.append(dlg);
-let session=null,timer=null,ctx=null,wake=null,voice=false,sound=true,lastTick=0,closing=false;
+let session=null,timer=null,ctx=null,wake=null,voice=false,sound=false,lastTick=0,closing=false;
 const C=id=>dlg.querySelector('#'+id);
 const fmt=n=>String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');
 function beep(hz=660){if(!sound||!ctx)return;try{const o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=hz;g.gain.setValueAtTime(.07,ctx.currentTime);g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.13);o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+.14)}catch(_){}}
-function audioReady(){try{const A=window.AudioContext||window.webkitAudioContext;if(A&&!ctx)ctx=new A();if(ctx?.state==='suspended')ctx.resume().catch(()=>{})}catch(_){}}
-function say(t){if(!voice||!('speechSynthesis'in window))return;try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='ja-JP';u.rate=1.25;speechSynthesis.speak(u)}catch(_){}}
+function audioReady(){if(!sound)return;try{if(navigator.audioSession)navigator.audioSession.type='ambient';}catch(_){}try{const A=window.AudioContext||window.webkitAudioContext;if(A&&!ctx)ctx=new A();if(ctx?.state==='suspended')ctx.resume().catch(()=>{})}catch(_){}}
+function say(t){if(!voice||!('speechSynthesis'in window))return;try{if(navigator.audioSession)navigator.audioSession.type='ambient';}catch(_){}try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='ja-JP';u.rate=1.25;speechSynthesis.speak(u)}catch(_){}}
 function cue(t,hz){beep(hz);say(t)}
 async function keepAwake(){try{if(navigator.wakeLock&&dlg.open&&!document.hidden&&!wake){const w=await navigator.wakeLock.request('screen');if(!dlg.open){await w.release();return}wake=w;w.addEventListener('release',()=>{if(wake===w)wake=null})}}catch(_){}}
-function stopClock(){if(timer!==null)clearInterval(timer);timer=null;try{if('speechSynthesis'in window)speechSynthesis.cancel()}catch(_){}}
+function stopClock(){if(timer!==null)clearInterval(timer);timer=null;try{if(voice&&'speechSynthesis'in window)speechSynthesis.cancel()}catch(_){}}
 function setMode(mode){stopClock();session.mode=mode;session.paused=false;draw()}
 function item(){return session.queue[session.i]}
 function exercise(){return item()?.e}
@@ -49,7 +49,7 @@ function header(){
  const a=item();return '<div class="row between"><span class="tag">TRAINING COACH / '+esc(session.date)+'</span><button id="cExit">終了</button></div><div class="coach-bar"><div style="width:'+Math.round((session.i/session.queue.length)*100)+'%"></div></div><p class="coach-small">進行 '+Math.min(session.i+1,session.queue.length)+' / '+session.queue.length+' セット ・ 確認保存 '+session.confirmed+' ・ スキップ '+session.skipped+'</p>'+(a?'<h2>'+esc(a.e.name)+'</h2><p>'+a.set+' / '+a.total+' セット '+(a.e.id==='row'?(session.side===1?'・右側':'・左側から'):'')+'</p>':'')
 }
 function options(){
- return '<div class="coach-action"><label><input style="width:auto" type="checkbox" id="cSound" '+(sound?'checked':'')+'> 合図音</label><label><input style="width:auto" type="checkbox" id="cVoice" '+(voice?'checked':'')+'> 音声ガイド</label></div>'
+ return '<p class="coach-small">音楽優先：合図音・音声ガイドを両方OFFにすると、このサイトは音を再生しません。ON時は端末によって音楽が一時停止することがあります。</p><div class="coach-action"><label><input style="width:auto" type="checkbox" id="cSound" '+(sound?'checked':'')+'> 合図音</label><label><input style="width:auto" type="checkbox" id="cVoice" '+(voice?'checked':'')+'> 音声ガイド</label></div>'
 }
 function draw(){
  if(!session)return;
@@ -124,12 +124,12 @@ function storeSet(){
 function closeCoach(force=false,next=''){
  if(!session)return;
  if(!force&&session.mode!=='done'&&!confirm('終了しますか？ 確認済みの実績は保存されています。未確認のセット（片側だけのローを含む）は記録されません。'))return;
- stopClock();closing=true;dlg.close();closing=false;session=null;if(wake){wake.release().catch(()=>{});wake=null}if(next)tab=next;render()
+ stopClock();if(ctx){const old=ctx;ctx=null;old.close().catch(()=>{})}closing=true;dlg.close();closing=false;session=null;if(wake){wake.release().catch(()=>{});wake=null}if(next)tab=next;render()
 }
 launch.onclick=begin;
 dlg.addEventListener('cancel',ev=>{ev.preventDefault();closeCoach()});
 dlg.addEventListener('close',()=>{if(!closing&&session){stopClock();session=null;if(wake){wake.release().catch(()=>{});wake=null}}});
-dlg.addEventListener('change',ev=>{const id=ev.target.id;if(id==='cSound')sound=ev.target.checked;if(id==='cVoice')voice=ev.target.checked;if(id==='cSpeed'&&session?.mode==='ready'){const c=settingsFor(exercise());c.speed=+ev.target.value;const p=dlg.querySelectorAll('.coach-small');const line=p[p.length-1];if(line&&exercise().id!=='plank')line.textContent=tempos[exercise().id].map(([t,s])=>t+' '+s*c.speed+'秒').join(' → ')}});
+dlg.addEventListener('change',ev=>{const id=ev.target.id;if(id==='cSound'){sound=ev.target.checked;if(sound)audioReady();else if(ctx){const old=ctx;ctx=null;old.close().catch(()=>{})}}if(id==='cVoice'){if(voice&&!ev.target.checked&&'speechSynthesis'in window)speechSynthesis.cancel();voice=ev.target.checked;}if(id==='cSpeed'&&session?.mode==='ready'){const c=settingsFor(exercise());c.speed=+ev.target.value;const p=dlg.querySelectorAll('.coach-small');const line=p[p.length-1];if(line&&exercise().id!=='plank')line.textContent=tempos[exercise().id].map(([t,s])=>t+' '+s*c.speed+'秒').join(' → ')}});
 dlg.addEventListener('click',ev=>{
  const b=ev.target.closest('button');if(!b||!session)return;
  try{audioReady();switch(b.id){
